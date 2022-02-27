@@ -36,7 +36,7 @@ import (
 type MetricsScaledObjectReconciler struct {
 	Client                  client.Client
 	ScaleHandler            scaling.ScaleHandler
-	ExternalMetricsInfo     *[]provider.ExternalMetricInfo
+	ExternalMetricsInfo     *[]provider.ExternalMetricInfo // 所有需要发布的指标名称
 	ExternalMetricsInfoLock *sync.RWMutex
 	MaxConcurrentReconciles int
 }
@@ -88,6 +88,7 @@ func (r *MetricsScaledObjectReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// 添加该 scaleObject 到要发布的指标名称map
 	r.addToMetricsCache(req.NamespacedName.String(), scaledObject.Status.ExternalMetricNames)
 	err = r.ScaleHandler.ClearScalersCache(ctx, scaledObject)
 	if err != nil {
@@ -107,7 +108,10 @@ func (r *MetricsScaledObjectReconciler) SetupWithManager(mgr ctrl.Manager, optio
 func (r *MetricsScaledObjectReconciler) addToMetricsCache(namespacedName string, metrics []string) {
 	scaledObjectsMetricsLock.Lock()
 	defer scaledObjectsMetricsLock.Unlock()
+
+	// 待发布指标名称，来自scaledObject.Status.ExternalMetricNames
 	scaledObjectsMetrics[namespacedName] = metrics
+	// 构建所有需要发布的外部指标名称
 	extMetrics := populateExternalMetrics(scaledObjectsMetrics)
 
 	r.ExternalMetricsInfoLock.Lock()
