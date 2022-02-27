@@ -41,9 +41,12 @@ import (
 
 // ScaleHandler encapsulates the logic of calling the right scalers for
 // each ScaledObject and making the final scale decision and operation
+// 封装了每个 ScaledObject 调用Scalers的逻辑，做出最终决策和操作
+// 1个 reconciler 只有1个 ScaleHandler
 type ScaleHandler interface {
 	HandleScalableObject(ctx context.Context, scalableObject interface{}) error
 	DeleteScalableObject(ctx context.Context, scalableObject interface{}) error
+	// 获取 ScaledObject 对应的 scaler
 	GetScalersCache(ctx context.Context, scalableObject interface{}) (*cache.ScalersCache, error)
 	ClearScalersCache(ctx context.Context, scalableObject interface{}) error
 }
@@ -83,6 +86,8 @@ func (h *scaleHandler) HandleScalableObject(ctx context.Context, scalableObject 
 	key := withTriggers.GenerateIdenitifier()
 	ctx, cancel := context.WithCancel(ctx)
 
+	// 这种取消的方式也挺好，存在Map里，有就说明上次的还在跑，利用cancel取消掉。
+	// 我常用的方法是在struct里记录一个标记位，标记位为真时，执行cancel，冗余记录信息了
 	// cancel the outdated ScaleLoop for the same ScaledObject (if exists)
 	value, loaded := h.scaleLoopContexts.LoadOrStore(key, cancel)
 	if loaded {
@@ -141,6 +146,7 @@ func (h *scaleHandler) DeleteScalableObject(ctx context.Context, scalableObject 
 func (h *scaleHandler) startScaleLoop(ctx context.Context, withTriggers *kedav1alpha1.WithTriggers, scalableObject interface{}, scalingMutex sync.Locker) {
 	logger := h.logger.WithValues("type", withTriggers.Kind, "namespace", withTriggers.Namespace, "name", withTriggers.Name)
 
+	// 这是内部Scaler走的逻辑，周期性调用 ScalerActive 检查事件源是否还Active，依据Active状态，记录数据或进行Scale扩缩
 	pollingInterval := withTriggers.GetPollingInterval()
 	logger.V(1).Info("Watching with pollingInterval", "PollingInterval", pollingInterval)
 
@@ -191,6 +197,7 @@ func (h *scaleHandler) GetScalersCache(ctx context.Context, scalableObject inter
 		return nil, err
 	}
 
+	// 构建该 scaleObject 使用的 scalerBuilders
 	scalers, err := h.buildScalers(ctx, withTriggers, podTemplateSpec, containerName)
 	if err != nil {
 		return nil, err
@@ -246,6 +253,7 @@ func (h *scaleHandler) startPushScalers(ctx context.Context, withTriggers *kedav
 					scalingMutex.Lock()
 					switch obj := scalableObject.(type) {
 					case *kedav1alpha1.ScaledObject:
+						// 关键路径: 应该是让 HPA 去执行1次 scale
 						h.scaleExecutor.RequestScale(ctx, obj, active, false)
 					case *kedav1alpha1.ScaledJob:
 						h.logger.Info("Warning: External Push Scaler does not support ScaledJob", "object", scalableObject)
@@ -259,6 +267,7 @@ func (h *scaleHandler) startPushScalers(ctx context.Context, withTriggers *kedav
 
 // checkScalers contains the main logic for the ScaleHandler scaling logic.
 // It'll check each trigger active status then call RequestScale
+// 关键路径
 func (h *scaleHandler) checkScalers(ctx context.Context, scalableObject interface{}, scalingMutex sync.Locker) {
 	cache, err := h.GetScalersCache(ctx, scalableObject)
 	if err != nil {

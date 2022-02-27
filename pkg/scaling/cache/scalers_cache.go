@@ -40,6 +40,7 @@ type ScalersCache struct {
 }
 
 type ScalerBuilder struct {
+	// factory 构建的scaler缓存在这里，无需每次构建
 	Scaler  scalers.Scaler
 	Factory func() (scalers.Scaler, error)
 }
@@ -52,6 +53,7 @@ func (c *ScalersCache) GetScalers() []scalers.Scaler {
 	return result
 }
 
+// 提取 Scalers 缓存中的 PushScaler
 func (c *ScalersCache) GetPushScalers() []scalers.PushScaler {
 	var result []scalers.PushScaler
 	for _, s := range c.Scalers {

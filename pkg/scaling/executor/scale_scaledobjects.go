@@ -97,6 +97,7 @@ func (e *scaleExecutor) RequestScale(ctx context.Context, scaledObject *kedav1al
 			// AND
 			// replica count is equal to 0
 
+			// 从0扩上来
 			// Scale the ScaleTarget up
 			e.scaleFromZeroOrIdle(ctx, logger, scaledObject, currentScale)
 		case isError:

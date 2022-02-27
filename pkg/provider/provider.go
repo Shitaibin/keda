@@ -70,7 +70,7 @@ func NewProvider(ctx context.Context, adapterLogger logr.Logger, scaleHandler sc
 // Metric is normally identified by a name and a set of labels/tags. It is up to a specific
 // implementation how to translate metricSelector to a filter for metric values.
 // Namespace can be used by the implementation for metric identification, access control or ignored.
-// 应该是注册给了API server，API server回来访问
+// 获取所有scaler所使用的externalMetric
 func (p *KedaProvider) GetExternalMetric(ctx context.Context, namespace string, metricSelector labels.Selector, info provider.ExternalMetricInfo) (*external_metrics.ExternalMetricValueList, error) {
 	// Note:
 	//		metric name and namespace is used to lookup for the CRD which contains configuration
@@ -106,19 +106,19 @@ func (p *KedaProvider) GetExternalMetric(ctx context.Context, namespace string, 
 
 	scalerError := false
 
+	// 获取所有scaler的metric
 	for scalerIndex, scaler := range cache.GetScalers() {
+		// HPA 使用的spec
 		metricSpecs := scaler.GetMetricSpecForScaling(ctx)
 		scalerName := strings.Replace(fmt.Sprintf("%T", scaler), "*scalers.", "", 1)
 
 		for _, metricSpec := range metricSpecs {
 			// skip cpu/memory resource scaler
-			// cpu/memory 并不需要从 scaleobject 上取
 			if metricSpec.External == nil {
 				continue
 			}
 			// Filter only the desired metric
 			if strings.EqualFold(metricSpec.External.Metric.Name, info.Metric) {
-				// 从 scaler 获取指标
 				metrics, err := cache.GetMetricsForScaler(ctx, scalerIndex, info.Metric, metricSelector)
 				metrics, err = p.getMetricsWithFallback(ctx, metrics, err, info.Metric, scaledObject, metricSpec)
 
@@ -128,8 +128,7 @@ func (p *KedaProvider) GetExternalMetric(ctx context.Context, namespace string, 
 				} else {
 					for _, metric := range metrics {
 						metricValue, _ := metric.Value.AsInt64()
-						// 其实就是给 keda_metrics_adapter 设置指标值，只不过带了各种label，区分了是哪个 scaleObject 上的，这样所有
-						// scaleObject 的指标其实都耦合到1个指标上了
+						// 创建HPA使用的ExternalMetric
 						metricsServer.RecordHPAScalerMetric(namespace, scaledObject.Name, scalerName, scalerIndex, metric.MetricName, metricValue)
 					}
 					matchingMetrics = append(matchingMetrics, metrics...)

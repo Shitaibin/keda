@@ -67,18 +67,23 @@ const (
 
 // ScaledObjectSpec is the spec for a ScaledObject resource
 type ScaledObjectSpec struct {
+	// 要弹性的workload，可以只指定名字
 	ScaleTargetRef *ScaleTarget `json:"scaleTargetRef"`
+	// 弹性的参数
 	// +optional
 	PollingInterval *int32 `json:"pollingInterval,omitempty"`
 	// +optional
 	CooldownPeriod *int32 `json:"cooldownPeriod,omitempty"`
 	// +optional
+	// 无触发源时的副本数量，可以小于min，如果没有配置，则最小为min
 	IdleReplicaCount *int32 `json:"idleReplicaCount,omitempty"`
 	// +optional
+	// 如果没有配置，最小为0
 	MinReplicaCount *int32 `json:"minReplicaCount,omitempty"`
 	// +optional
 	MaxReplicaCount *int32 `json:"maxReplicaCount,omitempty"`
 	// +optional
+	// 原生 HPA 的配置
 	Advanced *AdvancedConfig `json:"advanced,omitempty"`
 
 	Triggers []ScaleTriggers `json:"triggers"`
@@ -119,10 +124,13 @@ type ScaleTarget struct {
 
 // ScaleTriggers reference the scaler that will be used
 type ScaleTriggers struct {
+	// Scaler 的类型，比如Kafka、MQ等
 	Type string `json:"type"`
 	// +optional
-	Name     string            `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
+	// Scaler 的配置
 	Metadata map[string]string `json:"metadata"`
+	// 访问 Scaler 需要的认证配置
 	// +optional
 	AuthenticationRef *ScaledObjectAuthRef `json:"authenticationRef,omitempty"`
 	// +optional
@@ -143,12 +151,15 @@ type ScaledObjectStatus struct {
 	// +optional
 	LastActiveTime *metav1.Time `json:"lastActiveTime,omitempty"`
 	// +optional
+	// 对 HPA 暴露的 ExternalMetric
 	ExternalMetricNames []string `json:"externalMetricNames,omitempty"`
 	// +optional
+	// 对 HPA 暴露的 ResourceMetric
 	ResourceMetricNames []string `json:"resourceMetricNames,omitempty"`
 	// +optional
 	Conditions Conditions `json:"conditions,omitempty"`
 	// +optional
+	// 被弹性对象的？还是当前scale object的？
 	Health map[string]HealthStatus `json:"health,omitempty"`
 }
 

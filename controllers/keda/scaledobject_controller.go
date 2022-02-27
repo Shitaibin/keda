@@ -71,8 +71,8 @@ type ScaledObjectReconciler struct {
 
 	scaleClient              scale.ScalesGetter
 	restMapper               meta.RESTMapper
-	scaledObjectsGenerations *sync.Map
-	scaleHandler             scaling.ScaleHandler
+	scaledObjectsGenerations *sync.Map            // 记录scaleObject的generation，用来判断scaleObject是否发生变动，如果变化则进入 requestScaleLoop
+	scaleHandler             scaling.ScaleHandler // 核心
 	kubeVersion              kedautil.K8sVersion
 }
 
@@ -177,6 +177,7 @@ func (r *ScaledObjectReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// reconcile ScaledObject and set status appropriately
+	// 关键路径
 	msg, err := r.reconcileScaledObject(ctx, reqLogger, scaledObject)
 	conditions := scaledObject.Status.Conditions.DeepCopy()
 	if err != nil {
@@ -201,6 +202,7 @@ func (r *ScaledObjectReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 // reconcileScaledObject implements reconciler logic for ScaleObject
+// 怎么计算出来 targetReplica 的？
 func (r *ScaledObjectReconciler) reconcileScaledObject(ctx context.Context, logger logr.Logger, scaledObject *kedav1alpha1.ScaledObject) (string, error) {
 	// Check scale target Name is specified
 	if scaledObject.Spec.ScaleTargetRef.Name == "" {
@@ -208,6 +210,7 @@ func (r *ScaledObjectReconciler) reconcileScaledObject(ctx context.Context, logg
 		return "ScaledObject doesn't have correct scaleTargetRef specification", err
 	}
 
+	// HPA 要通过 label 获取目标的指标，所以这里打上label
 	// Check the label needed for Metrics servers is present on ScaledObject
 	err := r.ensureScaledObjectLabel(ctx, logger, scaledObject)
 	if err != nil {
@@ -225,6 +228,7 @@ func (r *ScaledObjectReconciler) reconcileScaledObject(ctx context.Context, logg
 		return "ScaledObject doesn't have correct Idle/Min/Max Replica Counts specification", err
 	}
 
+	// 创建或更新HPA对象
 	// Create a new HPA or update existing one according to ScaledObject
 	newHPACreated, err := r.ensureHPAForScaledObjectExists(ctx, logger, scaledObject, &gvkr)
 	if err != nil {
@@ -243,6 +247,7 @@ func (r *ScaledObjectReconciler) reconcileScaledObject(ctx context.Context, logg
 
 	// Notify ScaleHandler if a new HPA was created or if ScaledObject was updated
 	if newHPACreated || scaleObjectSpecChanged {
+		// 关键路径
 		if r.requestScaleLoop(ctx, logger, scaledObject) != nil {
 			return "Failed to start a new scale loop with scaling logic", err
 		}
@@ -358,6 +363,7 @@ func (r *ScaledObjectReconciler) ensureHPAForScaledObjectExists(ctx context.Cont
 	err := r.Client.Get(ctx, types.NamespacedName{Name: hpaName, Namespace: scaledObject.Namespace}, foundHpa)
 	if err != nil && errors.IsNotFound(err) {
 		// HPA wasn't found -> let's create a new one
+		// 创建
 		err = r.createAndDeployNewHPA(ctx, logger, scaledObject, gvkr)
 		if err != nil {
 			return false, err
@@ -374,6 +380,7 @@ func (r *ScaledObjectReconciler) ensureHPAForScaledObjectExists(ctx context.Cont
 	}
 
 	// HPA was found -> let's check if we need to update it
+	// 更新
 	err = r.updateHPAIfNeeded(ctx, logger, scaledObject, foundHpa, gvkr)
 	if err != nil {
 		logger.Error(err, "Failed to check HPA for possible update")

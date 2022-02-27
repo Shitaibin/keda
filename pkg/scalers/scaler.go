@@ -39,12 +39,15 @@ func init() {
 type Scaler interface {
 
 	// The scaler returns the metric values for a metric Name and criteria matching the selector
+	// HPA 要使用的metric name & selector，keda 要把这些metric 暴露出去，hpa回来获取
 	GetMetrics(ctx context.Context, metricName string, metricSelector labels.Selector) ([]external_metrics.ExternalMetricValue, error)
 
 	// Returns the metrics based on which this scaler determines that the ScaleTarget scales. This is used to construct the HPA spec that is created for
 	// this scaled object. The labels used should match the selectors used in GetMetrics
+	// 生成 HPA 需要的 MetricSpec 。这里包含了metric name & selector， hpa 则知道要使用的metric
 	GetMetricSpecForScaling(ctx context.Context) []v2beta2.MetricSpec
 
+	// true 从0到1的弹性
 	IsActive(ctx context.Context) (bool, error)
 
 	// Close any resources that need disposing when scaler is no longer used or destroyed

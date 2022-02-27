@@ -60,11 +60,14 @@ func (r *ScaledObjectReconciler) createAndDeployNewHPA(ctx context.Context, logg
 
 // newHPAForScaledObject returns HPA as it is specified in ScaledObject
 func (r *ScaledObjectReconciler) newHPAForScaledObject(ctx context.Context, logger logr.Logger, scaledObject *kedav1alpha1.ScaledObject, gvkr *kedav1alpha1.GroupVersionKindResource) (*autoscalingv2beta2.HorizontalPodAutoscaler, error) {
+	// 关键参数1：metric spec
 	scaledObjectMetricSpecs, err := r.getScaledObjectMetricSpecs(ctx, logger, scaledObject)
 	if err != nil {
 		return nil, err
 	}
 
+	// v2beta2的 HPA
+	// 关键参数2：behavior
 	var behavior *autoscalingv2beta2.HorizontalPodAutoscalerBehavior
 	if r.kubeVersion.MinorVersion >= 18 && scaledObject.Spec.Advanced != nil && scaledObject.Spec.Advanced.HorizontalPodAutoscalerConfig != nil {
 		behavior = scaledObject.Spec.Advanced.HorizontalPodAutoscalerConfig.Behavior
@@ -121,18 +124,21 @@ func (r *ScaledObjectReconciler) newHPAForScaledObject(ctx context.Context, logg
 
 // updateHPAIfNeeded checks whether update of HPA is needed
 func (r *ScaledObjectReconciler) updateHPAIfNeeded(ctx context.Context, logger logr.Logger, scaledObject *kedav1alpha1.ScaledObject, foundHpa *autoscalingv2beta2.HorizontalPodAutoscaler, gvkr *kedav1alpha1.GroupVersionKindResource) error {
+	// 关键路径，生成HPA对象
 	hpa, err := r.newHPAForScaledObject(ctx, logger, scaledObject, gvkr)
 	if err != nil {
 		logger.Error(err, "Failed to create new HPA resource", "HPA.Namespace", scaledObject.Namespace, "HPA.Name", getHPAName(scaledObject))
 		return err
 	}
 
+	// 对比 HPA 的spec和labels，如果不同则对更新
 	// DeepDerivative ignores extra entries in arrays which makes removing the last trigger not update things, so trigger and update any time the metrics count is different.
 	if len(hpa.Spec.Metrics) != len(foundHpa.Spec.Metrics) || !equality.Semantic.DeepDerivative(hpa.Spec, foundHpa.Spec) {
 		logger.V(1).Info("Found difference in the HPA spec accordint to ScaledObject", "currentHPA", foundHpa.Spec, "newHPA", hpa.Spec)
 		if r.Client.Update(ctx, hpa) != nil {
 			foundHpa.Spec = hpa.Spec
 			logger.Error(err, "Failed to update HPA", "HPA.Namespace", foundHpa.Namespace, "HPA.Name", foundHpa.Name)
+			// TODO stb bug：这里返回的error是之前的，而不是update的
 			return err
 		}
 		// check if scaledObject.spec.behavior was defined, because it is supported only on k8s >= 1.18
@@ -146,6 +152,7 @@ func (r *ScaledObjectReconciler) updateHPAIfNeeded(ctx context.Context, logger l
 		if r.Client.Update(ctx, hpa) != nil {
 			foundHpa.ObjectMeta.Labels = hpa.ObjectMeta.Labels
 			logger.Error(err, "Failed to update HPA", "HPA.Namespace", foundHpa.Namespace, "HPA.Name", foundHpa.Name)
+			// TODO stb bug：这里返回的error是之前的，而不是update的
 			return err
 		}
 		logger.Info("Updated HPA according to ScaledObject", "HPA.Namespace", foundHpa.Namespace, "HPA.Name", foundHpa.Name)
@@ -174,11 +181,15 @@ func (r *ScaledObjectReconciler) getScaledObjectMetricSpecs(ctx context.Context,
 		}
 
 		if metricSpec.External != nil {
+			// 检查重复
 			externalMetricName := metricSpec.External.Metric.Name
 			if kedacontrollerutil.Contains(externalMetricNames, externalMetricName) {
 				return nil, fmt.Errorf("metricName %s defined multiple times in ScaledObject %s, please refer the documentation how to define metricName manually", externalMetricName, scaledObject.Name)
 			}
 
+			// 核心 ： 给 externalMetrics 添加keda的自定义label，这样 HPA 找 MetricsAdapter 请求指标的时候，MetricsAdapter 才知道这是请求的哪个对象的指标
+			// 原因：同类型的指标，可能会名称等相同，造成重复，比如workload1和workload2都使用了kafka的指标，明确二者定义的指标名称相同，如果没有keda没有按ScaledObject进行区分，
+			// 不同workload的指标就混合起来了
 			// add the scaledobject.keda.sh/name label. This is how the MetricsAdapter will know which scaledobject a metric is for when the HPA queries it.
 			metricSpec.External.Metric.Selector = &metav1.LabelSelector{MatchLabels: make(map[string]string)}
 			metricSpec.External.Metric.Selector.MatchLabels["scaledobject.keda.sh/name"] = scaledObject.Name
@@ -193,6 +204,7 @@ func (r *ScaledObjectReconciler) getScaledObjectMetricSpecs(ctx context.Context,
 		return scaledObjectMetricSpecs[i].Type < scaledObjectMetricSpecs[j].Type
 	})
 
+	// 使用的资源metric和external metric记录到 scaleObject status
 	// store External.MetricNames,Resource.MetricsNames used by scalers defined in the ScaledObject
 	status := scaledObject.Status.DeepCopy()
 	status.ExternalMetricNames = externalMetricNames
